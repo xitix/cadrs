@@ -26,7 +26,18 @@ pub fn export(
     meta: &DocumentMeta,
     store: &Store,
 ) -> Result<(), String> {
-    write_new(path, &pack(doc, meta, store, true)?)
+pub fn export(
+    path: &Path,
+    doc: &Document,
+    meta: &DocumentMeta,
+    store: &Store,
+) -> Result<(), String> {
+    write_new(path, &export_bytes(doc, meta, store)?)
+}
+
+/// Serializes current in-memory state and required source assets as a portable `.cadrs` package.
+pub fn export_bytes(doc: &Document, meta: &DocumentMeta, store: &Store) -> Result<Vec<u8>, String> {
+    pack(doc, meta, store, true)
 }
 
 /// The package of `doc` as [`export`] writes it: the bytes of a `.cadrs` file. `thumbnails`:

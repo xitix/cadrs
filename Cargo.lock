@@ -2365,6 +2365,7 @@ dependencies = [
  "tokio",
  "ureq",
  "uuid",
+ "wasm-bindgen",
  "wasm-bindgen-futures",
  "wayland-backend",
  "wayland-client",

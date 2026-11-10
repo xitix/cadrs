@@ -62,6 +62,9 @@ fn portable_round_trip_and_repeated_import_capture_current_state() {
     .unwrap();
     let package = temp.path().join("test.cadrs");
     native::export(&package, &doc, &meta, &source).unwrap();
+    let bytes = native::export_bytes(&doc, &meta, &source).unwrap();
+    let from_bytes = temp.path().join("from-bytes.cadrs");
+    std::fs::write(&from_bytes, bytes).unwrap();
     let (hash, _) = blobs::used_by(&doc)[0].clone();
     let expected = blobs::get(&hash).unwrap();
     blobs::forget(&hash);
@@ -70,8 +73,10 @@ fn portable_round_trip_and_repeated_import_capture_current_state() {
     let target = Store::new(temp.path().join("target"));
     let first = native::import(&package, &target, "recipient", 200).unwrap();
     let second = native::import(&package, &target, "recipient", 201).unwrap();
+    let third = native::import(&from_bytes, &target, "recipient", 202).unwrap();
     assert_ne!(first.document.id, doc.id);
     assert_ne!(first.document.id, second.document.id);
+    assert_ne!(first.document.id, third.document.id);
     let mut actual = first.document.clone();
     actual.id = doc.id;
     assert_eq!(actual, doc);
@@ -80,6 +85,9 @@ fn portable_round_trip_and_repeated_import_capture_current_state() {
         target.load(first.document.id).unwrap().document,
         first.document
     );
+    let mut from_bytes_doc = third.document.clone();
+    from_bytes_doc.id = doc.id;
+    assert_eq!(from_bytes_doc, doc);
     assert!(target.thumbnail_path(first.document.id).exists());
     assert_eq!(
         std::fs::read(target.thumbnail_path(first.document.id)).unwrap(),

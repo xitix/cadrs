@@ -91,7 +91,12 @@ pub fn run() -> AppExit {
     }
     // The top bar's star count (the page is always the latest release: it never checks for one).
     app.insert_resource(cadrs_app::github::FetchStars);
-    app.add_plugins((CadrsUiPlugin, CadrsAppPlugin)).run()
+    app.add_plugins((
+        CadrsUiPlugin,
+        CadrsAppPlugin,
+        cadrs_app::web_api::WebApiPlugin,
+    ))
+    .run()
 }
 
 /// `?quick-start` in the page's address (the site's embed): straight into a document
