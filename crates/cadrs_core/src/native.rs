@@ -26,6 +26,30 @@ pub fn export(
     meta: &DocumentMeta,
     store: &Store,
 ) -> Result<(), String> {
+    let bytes = export_bytes(doc, meta, store)?;
+    // Written beside it and then renamed, so no one sees half of it; never over a file there.
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let temp = path.with_file_name(format!(".{name}.{}.tmp", uuid::Uuid::new_v4().simple()));
+    let written = File::create_new(&temp)
+        .and_then(|mut f| f.write_all(&bytes).and_then(|()| f.sync_all()))
+        .and_then(|()| {
+            if cadrs_fs::exists(path) {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "File exists",
+                ))
+            } else {
+                cadrs_fs::rename(&temp, path)
+            }
+        });
+    if written.is_err() {
+        let _ = cadrs_fs::remove_file(&temp);
+    }
+    written.map_err(|e| e.to_string())
+}
+
+/// Serializes current in-memory state and required source assets as a portable `.cadrs` package.
+pub fn export_bytes(doc: &Document, meta: &DocumentMeta, store: &Store) -> Result<Vec<u8>, String> {
     let mut entries = BTreeMap::new();
     entries.insert(
         "manifest.ron".to_string(),
@@ -76,26 +100,9 @@ pub fn export(
         .map_err(|e| e.to_string())?;
         zip.write_all(&bytes).map_err(|e| e.to_string())?;
     }
-    let bytes = zip.finish().map_err(|e| e.to_string())?.into_inner();
-    // Written beside it and then renamed, so no one sees half of it; never over a file there.
-    let name = path.file_name().unwrap_or_default().to_string_lossy();
-    let temp = path.with_file_name(format!(".{name}.{}.tmp", uuid::Uuid::new_v4().simple()));
-    let written = File::create_new(&temp)
-        .and_then(|mut f| f.write_all(&bytes).and_then(|()| f.sync_all()))
-        .and_then(|()| {
-            if cadrs_fs::exists(path) {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::AlreadyExists,
-                    "File exists",
-                ))
-            } else {
-                cadrs_fs::rename(&temp, path)
-            }
-        });
-    if written.is_err() {
-        let _ = cadrs_fs::remove_file(&temp);
-    }
-    written.map_err(|e| e.to_string())
+    zip.finish()
+        .map(|writer| writer.into_inner())
+        .map_err(|e| e.to_string())
 }
 
 /// Validates a complete package, then installs a fresh library copy in one directory rename.

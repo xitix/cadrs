@@ -137,6 +137,8 @@ pub mod view_options;
 pub mod viewport;
 pub mod viewport_menu;
 pub mod walk;
+#[cfg(target_arch = "wasm32")]
+pub mod web_api;
 pub mod window_title;
 pub mod workspaces;
 

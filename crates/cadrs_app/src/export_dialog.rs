@@ -30,7 +30,7 @@ use bevy::text::{EditableText, FontWeight, TextEdit};
 use bevy::ui_widgets::{Activate, observe};
 use cadrs_core::rebuild::PendingJob;
 use cadrs_core::rebuild::exchange::{ExportFile, ExportItem, ExportRequest, ModelFormat};
-use cadrs_core::{FeatureId, PartId};
+use cadrs_core::{DocumentId, ElementId, Feature, FeatureId, PartId};
 use cadrs_drawing::dxf::DxfVersion;
 use cadrs_sketch::FaceName;
 use cadrs_ui::prelude::*;
@@ -56,6 +56,8 @@ impl Plugin for ExportDialogPlugin {
                 validate_tolerances,
                 on_folder_picked,
                 finish_exports,
+                #[cfg(target_arch = "wasm32")]
+                finish_api_step_exports,
                 #[cfg(not(target_arch = "wasm32"))]
                 finish_sends,
             )
@@ -163,6 +165,197 @@ struct RunningExport {
     pending: PendingJob<Result<Vec<ExportFile>, String>>,
     dir: PathBuf,
     base: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Component)]
+struct ApiStepExport {
+    pending: Option<PendingJob<Result<Vec<ExportFile>, String>>>,
+    request_id: String,
+    document_key: String,
+    file_name: String,
+    document_id: DocumentId,
+    element_id: ElementId,
+    expected_features: Vec<Feature>,
+    source: ExportSource,
+    frames: u32,
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn start_api_step_export(
+    world: &mut World,
+    request_id: String,
+    document_key: String,
+) -> Result<(), String> {
+    let active = world
+        .get_resource::<ActiveDocument>()
+        .ok_or_else(|| "No document is open".to_string())?;
+    let element = active
+        .active_element()
+        .ok_or_else(|| "No active tab to export".to_string())?;
+    let assembly = element.assembly_model().is_some();
+    let source = if assembly {
+        ExportSource::Assembly(Vec::new())
+    } else {
+        ExportSource::Parts(Vec::new())
+    };
+    let name = active.doc.name.clone();
+    let document_id = active.doc.id;
+    let element_id = element.id;
+    let expected_features = (!assembly).then(|| element.active_features());
+    let file_name = format!("{}.step", cadrs_core::export::sanitize(&name));
+    world.spawn(ApiStepExport {
+        pending: None,
+        request_id,
+        document_key,
+        file_name,
+        document_id,
+        element_id,
+        expected_features: expected_features.unwrap_or_default(),
+        source,
+        frames: 0,
+    });
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn finish_api_step_exports(world: &mut World) {
+    let mut query = world.query_filtered::<Entity, With<ApiStepExport>>();
+    let entities: Vec<_> = query.iter(world).collect();
+    for entity in entities {
+        let completed = world
+            .get::<ApiStepExport>(entity)
+            .and_then(|job| job.pending.as_ref().and_then(|pending| pending.poll()));
+        if let Some(result) = completed {
+            let Some(job) = world.entity_mut(entity).take::<ApiStepExport>() else {
+                continue;
+            };
+            let result = result
+                .unwrap_or_else(|| Err("Kernel stopped during STEP export".into()))
+                .and_then(|mut files| {
+                    if files.len() != 1 {
+                        return Err(format!(
+                            "Expected one STEP export file, got {}",
+                            files.len()
+                        ));
+                    }
+                    let file = files.remove(0);
+                    if file.extension != "step" {
+                        return Err(format!("Unexpected export format: {}", file.extension));
+                    }
+                    Ok(file.bytes)
+                });
+            crate::web_api::respond_step_export(
+                &job.request_id,
+                &job.document_key,
+                result,
+                &job.file_name,
+            );
+            continue;
+        }
+
+        let Some(job) = world.get::<ApiStepExport>(entity) else {
+            continue;
+        };
+        if job.pending.is_some() {
+            continue;
+        }
+        let (request_id, document_key, document_id, element_id, expected_features, source, frame) = (
+            job.request_id.clone(),
+            job.document_key.clone(),
+            job.document_id,
+            job.element_id,
+            job.expected_features.clone(),
+            job.source.clone(),
+            job.frames,
+        );
+        if frame >= 1800 {
+            world.despawn(entity);
+            crate::web_api::respond_step_export(
+                &request_id,
+                &document_key,
+                Err("Timed out waiting for the active tab to rebuild".into()),
+                "",
+            );
+            continue;
+        }
+        if let Some(mut job) = world.get_mut::<ApiStepExport>(entity) {
+            job.frames += 1;
+        }
+        if frame < 2 {
+            continue;
+        }
+        let Some(active) = world.get_resource::<ActiveDocument>() else {
+            world.despawn(entity);
+            crate::web_api::respond_step_export(
+                &request_id,
+                &document_key,
+                Err("The active document was closed".into()),
+                "",
+            );
+            continue;
+        };
+        let Some(element) = active.active_element() else {
+            world.despawn(entity);
+            crate::web_api::respond_step_export(
+                &request_id,
+                &document_key,
+                Err("The active tab was closed".into()),
+                "",
+            );
+            continue;
+        };
+        if active.doc.id != document_id || element.id != element_id {
+            world.despawn(entity);
+            crate::web_api::respond_step_export(
+                &request_id,
+                &document_key,
+                Err("The active document or tab changed during STEP export".into()),
+                "",
+            );
+            continue;
+        }
+        let cache = world.resource::<PartCache>();
+        if cache.rebuilding {
+            continue;
+        }
+        let settled = if element.assembly_model().is_some() {
+            cache.assembly == Some(element_id) && !cache.parts.is_empty()
+        } else {
+            cache.settled().is_some_and(|(id, features, _)| {
+                id == element_id && features == expected_features.as_slice()
+            })
+        };
+        if !settled {
+            continue;
+        }
+        let name = active.doc.name.clone();
+        let assembly = element.assembly_model().is_some();
+        let export_items = match items(world, &source) {
+            Ok(items) if !items.is_empty() => items,
+            Ok(_) => {
+                world.despawn(entity);
+                crate::web_api::respond_step_export(
+                    &request_id,
+                    &document_key,
+                    Err("The active tab has no parts to export".into()),
+                    "",
+                );
+                continue;
+            }
+            Err(error) => {
+                world.despawn(entity);
+                crate::web_api::respond_step_export(&request_id, &document_key, Err(error), "");
+                continue;
+            }
+        };
+        let mut request = ExportRequest::new(ModelFormat::Step, name, export_items);
+        request.assembly = assembly;
+        let pending = cadrs_core::rebuild::exchange::export_files(request);
+        if let Some(mut job) = world.get_mut::<ApiStepExport>(entity) {
+            job.pending = Some(pending);
+        }
+    }
 }
 
 const WIDTH: f32 = 560.0;
