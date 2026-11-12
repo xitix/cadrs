@@ -890,6 +890,12 @@ impl ActiveDocument {
     }
 }
 
+#[derive(Resource, Default)]
+pub struct ViewerMode(pub bool);
+
+#[derive(Resource, Default)]
+pub struct MinimalMode(pub bool);
+
 pub struct CadrsAppPlugin;
 
 impl Plugin for CadrsAppPlugin {
@@ -907,7 +913,9 @@ impl Plugin for CadrsAppPlugin {
         if !app.world().contains_resource::<UserProfile>() {
             app.insert_resource(UserProfile::system());
         }
-        app.init_state::<AppState>()
+        app.init_resource::<ViewerMode>()
+            .init_resource::<MinimalMode>()
+            .init_state::<AppState>()
             .add_sub_state::<sketch::PartStudioMode>()
             .add_plugins((
                 sketch::SketchPlugin,

@@ -309,9 +309,43 @@ fn spawn_shell(
     cube: Res<crate::view_cube::ViewCubeImage>,
     mut snapshot: ResMut<ShellSnapshot>,
     profile: Res<UserProfile>,
+    viewer: Option<Res<crate::ViewerMode>>,
 ) {
     *snapshot = ShellSnapshot::default();
     let t = theme.clone();
+    if viewer.is_some_and(|mode| mode.0) {
+        commands
+            .spawn((
+                Name::new("viewer-shell"),
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    min_width: Val::Px(0.0),
+                    min_height: Val::Px(0.0),
+                    ..default()
+                },
+                ViewportArea,
+                cadrs_ui::ToastHost,
+                DespawnOnExit(AppState::Document),
+            ))
+            .with_children(|vp| {
+                vp.spawn((
+                    Name::new("viewport-backdrop"),
+                    ViewportBackdrop,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(0.0),
+                        top: Val::Px(0.0),
+                        right: Val::Px(0.0),
+                        bottom: Val::Px(0.0),
+                        ..default()
+                    },
+                ));
+                crate::viewport::spawn_viewport_overlay(vp, &t);
+                crate::view_cube::spawn_view_cube(vp, &t, cube.0.clone());
+            });
+        return;
+    }
     let doc_name = doc
         .as_ref()
         .map(|d| d.doc.name.clone())

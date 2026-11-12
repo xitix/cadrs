@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CADRS viewer</title>
+<style>
+  html,body{margin:0;height:100%;background:#0f172a;color:#e2e8f0;font:14px/1.4 system-ui,sans-serif}
+  #frame{position:fixed;inset:0;width:100vw;height:100vh;border:0;background:#fff}
+  #panel{position:fixed;left:16px;top:16px;z-index:10;background:rgba(15,23,42,.94);border:1px solid #334155;
+         border-radius:10px;padding:10px 12px;max-width:min(420px,calc(100vw - 32px));box-shadow:0 10px 35px #0008}
+  #panel h1{font-size:13px;margin:0 0 6px}
+  #panel p{font-size:11px;color:#94a3b8;margin:0 0 8px}
+  button{padding:6px 9px;border-radius:6px;border:1px solid #475569;background:#1e293b;color:#e2e8f0;cursor:pointer;font-size:12px}
+  button:hover{background:#334155}
+  #status{font-size:11px;color:#cbd5e1;margin-top:6px}
+  #drop{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:20;
+        background:rgba(30,58,95,.75);border:3px dashed #ff6b35;color:#fff;font-size:18px;font-weight:700}
+  #drop.on{display:flex}
+</style>
+</head>
+<body>
+<iframe id="frame" title="CADRS viewer"></iframe>
+<div id="panel">
+  <h1>CADRS viewer</h1>
+  <p>Open or drop a <code>.cadrs</code> file. Read-only; nothing is uploaded.</p>
+  <input id="file" type="file" accept=".cadrs" hidden>
+  <button id="open" title="Open a .cadrs file">Open .cadrs</button>
+  <button id="fs" title="Toggle fullscreen">Fullscreen</button>
+  <button id="close" title="Close the viewer">Close</button>
+  <div id="status">Loading…</div>
+</div>
+<div id="drop">Drop .cadrs here</div>
+<script>
+const CADRS_ORIGIN = new URLSearchParams(location.search).get('cadrs') || 'http://localhost:8080';
+const frame = document.querySelector('#frame');
+const statusEl = document.querySelector('#status');
+let key = null;
+let pending = null;
+
+frame.src = `${CADRS_ORIGIN}/?viewer=1&cadrs-api-origins=${encodeURIComponent(location.origin)}`;
+frame.addEventListener('load', () => { statusEl.textContent = 'Viewer ready.'; });
+
+window.addEventListener('message', (event) => {
+  if (event.source !== frame.contentWindow || event.origin !== CADRS_ORIGIN) return;
+  const message = event.data;
+  if (!message || message.protocol !== 'cadrs.api' || message.version !== 1) return;
+  if (!pending || message.requestId !== pending.id) return;
+  clearTimeout(pending.timer);
+  const { resolve, reject } = pending;
+  pending = null;
+  if (message.ok) resolve(message); else reject(new Error(message.error || 'CADRS API error'));
+});
+
+function openBytes(buffer, name) {
+  if (pending) throw new Error('A file is already opening.');
+  key = `viewer-${crypto.randomUUID()}`;
+  const id = `viewer-request-${Date.now()}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { pending = null; reject(new Error('CADRS did not respond.')); }, 120000);
+    pending = { id, resolve, reject, timer };
+    frame.contentWindow.postMessage({ protocol: 'cadrs.api', version: 1, requestId: id, op: 'open-cadrs', documentKey: key, name, bytes: buffer }, CADRS_ORIGIN, [buffer]);
+  });
+}
+
+async function openFile(file) {
+  if (!file) return;
+  statusEl.textContent = `Opening ${file.name}…`;
+  try {
+    const response = await openBytes(await file.arrayBuffer(), file.name);
+    statusEl.textContent = `Opened: ${response.result?.documentName || file.name}`;
+  } catch (error) { statusEl.textContent = `Error: ${error.message}`; }
+}
+
+document.querySelector('#open').onclick = () => document.querySelector('#file').click();
+document.querySelector('#file').onchange = (event) => openFile(event.target.files?.[0]);
+document.querySelector('#fs').onclick = async () => {
+  if (document.fullscreenElement) await document.exitFullscreen();
+  else await document.documentElement.requestFullscreen();
+};
+document.querySelector('#close').onclick = () => {
+  if (window.opener || window.history.length <= 1) window.close();
+  else window.history.back();
+};
+for (const type of ['dragenter', 'dragover']) document.addEventListener(type, (event) => { event.preventDefault(); document.querySelector('#drop').classList.add('on'); });
+for (const type of ['dragleave', 'drop']) document.addEventListener(type, (event) => { event.preventDefault(); if (type === 'drop') openFile(event.dataTransfer?.files?.[0]); document.querySelector('#drop').classList.remove('on'); });
+</script>
+</body>
+</html>

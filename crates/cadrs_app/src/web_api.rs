@@ -248,6 +248,11 @@ fn handle_request(world: &mut World, request: Request) {
                 Ok(file) => {
                     let doc_name = file.document.name.clone();
                     open_document(world, file.document, file.meta);
+                    if world.resource::<crate::ViewerMode>().0 {
+                        if let Some(mut active) = world.get_resource_mut::<ActiveDocument>() {
+                            active.read_only = Some(cadrs_ui::i18n::tr("shell-linked-session-read-only").to_string());
+                        }
+                    }
                     set_active_key(world, key.clone());
                     respond(&id, &op, &key, Ok(None), Some(&doc_name));
                 }

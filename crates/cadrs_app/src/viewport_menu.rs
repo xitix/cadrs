@@ -53,6 +53,7 @@ fn feature_name(world: &World, id: FeatureId) -> String {
 
 /// Modeling: the menu for what was right-clicked (`pick`, from the modeling pick filter).
 pub fn open_modeling_menu(world: &mut World, at: Vec2, pick: Option<Pick>) {
+    if world.resource::<crate::ViewerMode>().0 { return; }
     // A sketch curve under the pointer (P3.5: its own appearance): only where a sketch is what
     // was picked, or nothing.
     let curve = match pick {
@@ -355,6 +356,7 @@ pub fn open_modeling_menu(world: &mut World, at: Vec2, pick: Option<Pick>) {
 
 /// Sketching: the sketch's own menu (off glyphs and dimensions).
 pub fn open_sketch_menu(world: &mut World, at: Vec2) {
+    if world.resource::<crate::ViewerMode>().0 { return; }
     let Some(s) = world.get_resource::<crate::sketch::SketchSession>() else {
         return;
     };
