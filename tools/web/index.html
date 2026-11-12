@@ -46,6 +46,60 @@
   const note = document.getElementById("note");
   const fill = document.getElementById("fill");
 
+  // The generic embedding API is enabled only with an explicit, exact-origin allowlist in
+  // `cadrs-api-origins`. CADRS never sends host-provided files to a URL itself.
+  const allowedApiOrigins = new Set();
+  for (const raw of new URLSearchParams(location.search).get("cadrs-api-origins")?.split(",") ?? []) {
+    try {
+      const url = new URL(raw);
+      const localHttp = url.protocol === "http:" &&
+        ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+      if ((url.protocol === "https:" || localHttp) && url.origin === raw) {
+        allowedApiOrigins.add(url.origin);
+      } else {
+        console.warn("Ignoring invalid CADRS API origin", raw);
+      }
+    } catch {
+      console.warn("Ignoring invalid CADRS API origin", raw);
+    }
+  }
+  if (allowedApiOrigins.size && window.parent !== window) {
+    const requests = [];
+    const requestOrigins = new Map();
+    addEventListener("message", (event) => {
+      if (event.source !== window.parent || !allowedApiOrigins.has(event.origin)) return;
+      const message = event.data;
+      if (message?.protocol !== "cadrs.api") return;
+      if (typeof message.requestId !== "string" || requestOrigins.has(message.requestId)) return;
+      const reject = (error) => window.parent.postMessage({
+        protocol: "cadrs.api", version: 1, requestId: message.requestId,
+        op: message.op, documentKey: message.documentKey, ok: false, error,
+      }, event.origin);
+      if (message.bytes !== undefined &&
+          (!(message.bytes instanceof ArrayBuffer) || message.bytes.byteLength > 512 * 1024 * 1024)) {
+        reject("bytes must be an ArrayBuffer no larger than 512 MiB");
+        return;
+      }
+      if (requestOrigins.size >= 4) {
+        reject("The CADRS API request queue is full");
+        return;
+      }
+      requestOrigins.set(message.requestId, event.origin);
+      requests.push(message);
+    });
+    globalThis.cadrsHostApi = {
+      poll: () => requests.shift() ?? null,
+      respond: (message) => {
+        const origin = requestOrigins.get(message?.requestId);
+        if (!origin || !allowedApiOrigins.has(origin)) return;
+        requestOrigins.delete(message.requestId);
+        const bytes = message?.result?.bytes;
+        const transfer = bytes instanceof Uint8Array ? [bytes.buffer] : [];
+        window.parent.postMessage(message, origin, transfer);
+      },
+    };
+  }
+
   // Without WebGPU: the downloads, this system's first.
   function downloads() {
     const latest = "https://github.com/rvdende/cadrs/releases/latest/download/";
