@@ -368,8 +368,10 @@ struct LandingRoot;
 fn relanguage(
     mut last: Local<&'static str>,
     q_root: Query<Entity, With<LandingRoot>>,
-    (commands, theme, profile, panel): (
+    (commands, viewer, minimal, theme, profile, panel): (
         Commands,
+        Option<Res<crate::ViewerMode>>,
+        Option<Res<crate::MinimalMode>>,
         Res<Theme>,
         Res<UserProfile>,
         Res<public_panel::PublicPanel>,
@@ -384,15 +386,18 @@ fn relanguage(
     for root in &q_root {
         commands.entity(root).despawn();
     }
-    spawn_landing(commands, theme, profile, panel);
+    spawn_landing(commands, viewer, minimal, theme, profile, panel);
 }
 
 fn spawn_landing(
     mut commands: Commands,
+    viewer: Option<Res<crate::ViewerMode>>,
+    minimal: Option<Res<crate::MinimalMode>>,
     theme: Res<Theme>,
     profile: Res<UserProfile>,
     panel: Res<public_panel::PublicPanel>,
 ) {
+
     let t = theme.clone();
     commands
         .spawn((
@@ -431,7 +436,9 @@ fn spawn_landing(
                 },
             ))
             .with_children(|page| {
-                actions(page, &t);
+                if !viewer.as_ref().is_some_and(|mode| mode.0) && !minimal.as_ref().is_some_and(|mode| mode.0) {
+                    actions(page, &t);
+                }
                 page.spawn(Node {
                     flex_grow: 1.0,
                     min_height: Val::Px(0.0),
@@ -439,8 +446,10 @@ fn spawn_landing(
                     ..default()
                 })
                 .with_children(|body| {
-                    documents_card(body, &t);
-                    public_panel::public_card(body, &t, &panel);
+                    if !viewer.as_ref().is_some_and(|mode| mode.0) && !minimal.as_ref().is_some_and(|mode| mode.0) {
+                        documents_card(body, &t);
+                        public_panel::public_card(body, &t, &panel);
+                    }
                 });
             });
         });

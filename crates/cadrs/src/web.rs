@@ -86,8 +86,14 @@ pub fn run() -> AppExit {
         .insert_resource(cadrs_app::eda::libraries::UserLibraries::load(Some(
             PathBuf::from(LIBRARIES),
         )));
-    if quick_start() {
+    if search_flag("quick-start") {
         app.insert_resource(cadrs_app::QuickStart);
+    }
+    if search_flag("viewer") {
+        app.insert_resource(cadrs_app::ViewerMode(true));
+    }
+    if search_flag("minimal") {
+        app.insert_resource(cadrs_app::MinimalMode(true));
     }
     // The top bar's star count (the page is always the latest release: it never checks for one).
     app.insert_resource(cadrs_app::github::FetchStars);
@@ -101,7 +107,7 @@ pub fn run() -> AppExit {
 
 /// `?quick-start` in the page's address (the site's embed): straight into a document
 /// ([`cadrs_app::QuickStart`]).
-fn quick_start() -> bool {
+fn search_flag(name: &str) -> bool {
     let get = |from: &js_sys::wasm_bindgen::JsValue, key: &str| {
         js_sys::Reflect::get(from, &key.into()).ok()
     };
@@ -112,5 +118,5 @@ fn quick_start() -> bool {
     search
         .trim_start_matches('?')
         .split('&')
-        .any(|p| p == "quick-start" || p.starts_with("quick-start="))
+        .any(|p| p == name || p.starts_with(&format!("{name}=")))
 }
