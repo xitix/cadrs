@@ -26,12 +26,6 @@ pub fn export(
     meta: &DocumentMeta,
     store: &Store,
 ) -> Result<(), String> {
-pub fn export(
-    path: &Path,
-    doc: &Document,
-    meta: &DocumentMeta,
-    store: &Store,
-) -> Result<(), String> {
     write_new(path, &export_bytes(doc, meta, store)?)
 }
 
